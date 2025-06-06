@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
@@ -34,17 +37,41 @@ m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
 		log.Fatalf("error: enforcer: %s", err)
 	}
 
-	ok, err := e.Enforce("alice", "data1", "read")
-	if err != nil {
-		log.Fatalf("error: enforce: %s", err)
+	fmt.Println("Casbin Playground - Enter 'sub,obj,act' format (Ctrl+D to exit)")
+	fmt.Print("> ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input := strings.TrimSpace(scanner.Text())
+		if input == "" {
+			fmt.Print("> ")
+			continue
+		}
+
+		parts := strings.Split(input, ",")
+		if len(parts) != 3 {
+			fmt.Println("Error: Please enter in 'sub,obj,act' format")
+			fmt.Print("> ")
+			continue
+		}
+
+		sub := strings.TrimSpace(parts[0])
+		obj := strings.TrimSpace(parts[1])
+		act := strings.TrimSpace(parts[2])
+
+		ok, err := e.Enforce(sub, obj, act)
+		if err != nil {
+			fmt.Printf("Error: enforce: %s\n", err)
+		} else {
+			fmt.Printf("%s / %s / %s: %v\n", sub, obj, act, ok)
+		}
+
+		fmt.Print("> ")
 	}
 
-	fmt.Printf("alice / data1 / read: %v\n", ok)
-
-	ok, err = e.Enforce("bob", "data1", "read")
-	if err != nil {
-		log.Fatalf("error: enforce: %s", err)
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error reading input: %s", err)
 	}
 
-	fmt.Printf("bob / data1 / read: %v\n", ok)
+	fmt.Println("\nGoodbye!")
 }
