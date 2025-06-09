@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/casbin/casbin/v2"
-	"github.com/casbin/casbin/v2/model"
 	fileadapter "github.com/casbin/casbin/v2/persist/file-adapter"
 )
 
@@ -22,54 +21,38 @@ type ErrorResponse struct {
 }
 
 var enforcer *casbin.Enforcer
+var watcherCh chan string
 
 func main() {
-	// コマンドライン引数の解析
 	port := flag.Int("port", 8080, "Port number to listen on")
 	flag.Parse()
 
-	// Casbinの初期化
-	a := fileadapter.NewAdapter("policy.csv")
-
-	m, err := model.NewModelFromString(`
-[request_definition]
-r = sub, obj, act
-
-[policy_definition]
-p = sub, obj, act
-
-[policy_effect]
-e = some(where (p.eft == allow))
-
-[matchers]
-m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
-`)
+	watcherCh = make(chan string)
+	adapter := fileadapter.NewAdapter("policy.csv")
+	watcher, err := NewWatcher(watcherCh)
 	if err != nil {
-		log.Fatalf("error: model: %s", err)
+		log.Fatalf("error: watcher: %s", err)
 	}
 
-	enforcer, err = casbin.NewEnforcer(m, a)
+	enforcer, err = NewEnforcer()
 	if err != nil {
 		log.Fatalf("error: enforcer: %s", err)
 	}
 
-	// HTTPハンドラーの設定
-	http.HandleFunc("/check", checkHandler)
+	enforcer.SetAdapter(adapter)
+	enforcer.SetWatcher(watcher)
+	enforcer.LoadPolicy()
+
+	http.HandleFunc("GET /check", checkHandler)
+	http.HandleFunc("POST /update", updateHandler)
 
 	addr := fmt.Sprintf(":%d", *port)
 	fmt.Printf("Casbin HTTP API Server starting on %s\n", addr)
-	fmt.Println("Usage: GET /check?query=sub,obj,act")
+	fmt.Println("Usage: \n- GET /check?query=sub,obj,act\n- POST /update")
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
 func checkHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(ErrorResponse{Error: "Method not allowed"})
-		return
-	}
-
 	query := r.URL.Query().Get("query")
 	if query == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -100,4 +83,11 @@ func checkHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(CheckResponse{OK: ok})
+}
+
+func updateHandler(w http.ResponseWriter, r *http.Request) {
+	watcherCh <- "update"
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNoContent)
 }
